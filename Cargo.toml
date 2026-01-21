@@ -223,7 +223,8 @@ members = [
   "src/hyperloglog",
   "src/parquet2",
   "src/parquet-format-safe",
-  "src/daft-cli"
+  "src/daft-cli",
+  "src/daft-expr-name"
 ]
 
 [workspace.dependencies]

@@ -1,0 +1,12 @@
+[package]
+name = "daft-expr-name"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+daft-core = {path = "../daft-core"}
+daft-dsl = {path = "../daft-dsl"}
+sqlparser = {workspace = true}
+
+[lints]
+workspace = true

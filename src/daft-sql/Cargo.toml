@@ -11,6 +11,7 @@ daft-functions = {path = "../daft-functions"}
 daft-functions-list = {path = "../daft-functions-list"}
 daft-functions-temporal = {path = "../daft-functions-temporal"}
 daft-functions-utf8 = {path = "../daft-functions-utf8"}
+daft-expr-name = {path = "../daft-expr-name"}
 daft-logical-plan = {path = "../daft-logical-plan"}
 daft-micropartition = {path = "../daft-micropartition", default-features = false}
 daft-recordbatch = {path = "../daft-recordbatch"}

@@ -1343,6 +1343,11 @@ class Expression:
     def name(self) -> builtins.str:
         return self._expr.name()
 
+    def normalized_name(self) -> builtins.str:
+        from daft.daft import expr_normalized_name  # type: ignore[attr-defined]
+
+        return expr_normalized_name(self._expr)
+
     def over(self, window: Window) -> Expression:
         """Apply the expression as a window function.
 

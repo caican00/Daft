@@ -2755,6 +2755,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "daft-expr-name"
+version = "0.3.0-dev0"
+dependencies = [
+ "daft-core",
+ "daft-dsl",
+ "sqlparser",
+]
+
+[[package]]
 name = "daft-file"
 version = "0.3.0-dev0"
 dependencies = [
@@ -3386,6 +3395,7 @@ dependencies = [
  "daft-context",
  "daft-core",
  "daft-dsl",
+ "daft-expr-name",
  "daft-functions",
  "daft-functions-list",
  "daft-functions-temporal",

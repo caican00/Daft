@@ -2,7 +2,6 @@ pub mod error;
 pub mod functions;
 
 mod exec;
-mod expr_name;
 mod modules;
 mod planner;
 mod schema;
@@ -21,6 +20,7 @@ pub fn register_modules(parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(python::sql_exec, parent)?)?;
     parent.add_function(wrap_pyfunction!(python::sql_expr, parent)?)?;
     parent.add_function(wrap_pyfunction!(python::sql_datatype, parent)?)?;
+    parent.add_function(wrap_pyfunction!(python::expr_normalized_name, parent)?)?;
     parent.add_function(wrap_pyfunction!(python::list_sql_functions, parent)?)?;
     Ok(())
 }

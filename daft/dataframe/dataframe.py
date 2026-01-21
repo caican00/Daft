@@ -1983,7 +1983,7 @@ class DataFrame:
             <BLANKLINE>
             (Showing first 3 of 3 rows)
         """
-        selection = column_inputs_to_expressions(columns)
+        selection = [expr.alias(expr.normalized_name()) for expr in column_inputs_to_expressions(columns)]
         selection += [expr.alias(alias) for (alias, expr) in projections.items()]
         builder = self._builder.select(selection)
         return DataFrame(builder)

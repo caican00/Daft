@@ -14,6 +14,7 @@ use daft_dsl::{
     functions::{FunctionExpr, ScalarUDF, scalar::ScalarFn, struct_::StructExpr},
     has_agg, lit, null_lit, resolved_col, unresolved_col,
 };
+use daft_expr_name::normalized_sql_expr_name;
 use daft_functions::{
     invalid_argument_err,
     numeric::{ceil::ceil, floor::floor},
@@ -38,8 +39,8 @@ use sqlparser::{
 };
 
 use crate::{
-    column_not_found_err, error::*, expr_name::normalized_sql_expr_name, invalid_operation_err,
-    schema::sql_dtype_to_dtype, statement::Statement, table_not_found_err, unsupported_sql_err,
+    column_not_found_err, error::*, invalid_operation_err, schema::sql_dtype_to_dtype,
+    statement::Statement, table_not_found_err, unsupported_sql_err,
 };
 
 /// Bindings are used to lookup in-scope tables, views, and columns (targets T).

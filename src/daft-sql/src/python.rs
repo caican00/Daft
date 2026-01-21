@@ -72,6 +72,11 @@ pub fn sql_datatype(sql: &str) -> PyResult<PyDataType> {
 }
 
 #[pyfunction]
+pub fn expr_normalized_name(expr: &PyExpr) -> PyResult<String> {
+    Ok(daft_expr_name::normalized_daft_expr_name(&expr.expr))
+}
+
+#[pyfunction]
 pub fn list_sql_functions() -> Vec<SQLFunctionStub> {
     SQL_FUNCTIONS
         .map
