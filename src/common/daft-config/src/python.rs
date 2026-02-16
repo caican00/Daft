@@ -119,6 +119,7 @@ impl PyDaftExecutionConfig {
         enable_dynamic_batching=None,
         dynamic_batching_strategy=None,
         shuffle_spill_threshold=None,
+        shuffle_reduce_spill_dir=None,
     ))]
     fn with_config_values(
         &self,
@@ -152,6 +153,7 @@ impl PyDaftExecutionConfig {
         enable_dynamic_batching: Option<bool>,
         dynamic_batching_strategy: Option<&str>,
         shuffle_spill_threshold: Option<usize>,
+        shuffle_reduce_spill_dir: Option<&str>,
     ) -> PyResult<Self> {
         let mut config = self.config.as_ref().clone();
 
@@ -271,6 +273,21 @@ impl PyDaftExecutionConfig {
 
         if let Some(shuffle_spill_threshold) = shuffle_spill_threshold {
             config.shuffle_spill_threshold = Some(shuffle_spill_threshold);
+        }
+
+        if let Some(shuffle_reduce_spill_dir) = shuffle_reduce_spill_dir {
+            let path = shuffle_reduce_spill_dir.trim();
+            // Reject non-local schemes
+            if path.contains("://") && !path.starts_with("file://") {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "shuffle_reduce_spill_dir must be a local filesystem path, not a remote URI: '{}'",
+                    path
+                )));
+            }
+
+            // Strip file:// prefix if present to ensure PathBuf works correctly
+            let local_path = path.strip_prefix("file://").unwrap_or(path);
+            config.shuffle_reduce_spill_dir = Some(local_path.to_string());
         }
 
         Ok(Self {
@@ -416,6 +433,11 @@ impl PyDaftExecutionConfig {
     #[getter]
     fn shuffle_spill_threshold(&self) -> PyResult<Option<usize>> {
         Ok(self.config.shuffle_spill_threshold)
+    }
+
+    #[getter]
+    fn shuffle_reduce_spill_dir(&self) -> PyResult<Option<&str>> {
+        Ok(self.config.shuffle_reduce_spill_dir.as_deref())
     }
 }
 

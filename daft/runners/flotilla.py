@@ -75,15 +75,38 @@ class RaySwordfishActor:
         from daft.daft import PyDaftContext
 
         with profile():
-            psets_mp: dict[str, list[PyMicroPartition]] = {
-                k: [ray.get(r)._micropartition for r in refs] for k, refs in psets.items()
-            }
-
-            metas = []
             native_executor = NativeExecutor()
             ctx = PyDaftContext()
             ctx._daft_execution_config = exec_cfg
-            result_handle = native_executor.run(plan, psets_mp, ctx, None, context)
+
+            # Check if we should use streaming mode to avoid OOM.
+            # Streaming mode lazily fetches partitions via ray.get() one at a time
+            # instead of materializing all psets upfront.
+            use_streaming = len(psets) == 1 and any(len(refs) > 1 for refs in psets.values())
+
+            if use_streaming:
+                # Lazy generator: ray.get() one ref at a time
+                all_refs = next(iter(psets.values()))
+                first_mp = ray.get(all_refs[0])
+                source_schema = first_mp._micropartition.schema()
+
+                def lazy_partition_iter():
+                    # Yield the already-fetched first partition, then lazily fetch the rest
+                    yield first_mp._micropartition
+                    for ref in all_refs[1:]:
+                        mp = ray.get(ref)
+                        yield mp._micropartition
+
+                result_handle = native_executor.run_streaming(
+                    plan, lazy_partition_iter(), source_schema, ctx, None, context
+                )
+            else:
+                psets_mp: dict[str, list[PyMicroPartition]] = {
+                    k: [ray.get(r)._micropartition for r in refs] for k, refs in psets.items()
+                }
+                result_handle = native_executor.run(plan, psets_mp, ctx, None, context)
+
+            metas = []
             async for partition in result_handle:
                 if partition is None:
                     break

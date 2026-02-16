@@ -3032,6 +3032,10 @@ name = "daft-local-execution"
 version = "0.3.0-dev0"
 dependencies = [
  "arc-swap",
+ "arrow-array",
+ "arrow-row",
+ "arrow-schema",
+ "arrow-select",
  "async-trait",
  "capitalize",
  "common-daft-config",
@@ -3077,10 +3081,12 @@ dependencies = [
  "rand 0.8.5",
  "serde_json",
  "snafu",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "uuid 1.19.0",
 ]
 
 [[package]]

@@ -298,20 +298,20 @@ class RayPartitionSet(PartitionSet[list[ray.ObjectRef]]):
             assert ids_and_partitions[0][0] == 0
             assert ids_and_partitions[-1][0] + 1 == len(ids_and_partitions)
 
-        all_refs = []
-        for _, part in ids_and_partitions:
-            all_refs.extend(part.partition())
+        # Fetch chunks one at a time to avoid a single bulk ray.get() call
+        # that would deserialize all ObjectRefs simultaneously.
+        all_micropartitions = []
+        for _, mat_result in ids_and_partitions:
+            for chunk in mat_result.iter_chunks():
+                all_micropartitions.append(chunk)
 
-        all_micropartitions = ray.get(all_refs)
         return MicroPartition.concat_or_empty(all_micropartitions, schema)
 
     def _get_preview_micropartitions(self, num_rows: int) -> list[MicroPartition]:
         ids_and_partitions = self.items()
         preview_parts = []
         for _, mat_result in ids_and_partitions:
-            refs: list[ray.ObjectRef] = mat_result.partition()
-            parts: list[MicroPartition] = ray.get(refs)
-            for part in parts:
+            for part in mat_result.iter_chunks():
                 part_len = len(part)
                 if part_len >= num_rows:
                     preview_parts.append(part.slice(0, num_rows))
@@ -359,6 +359,21 @@ class RayPartitionSet(PartitionSet[list[ray.ObjectRef]]):
 
     def get_partition(self, idx: PartID) -> RayMaterializedResult:
         return self._results[idx]
+
+    def get_partition_lazy(self, idx: PartID) -> Generator[MicroPartition, None, None]:
+        """Get a lazy iterator over the chunks of a partition.
+
+        This method allows consuming partition chunks one at a time,
+        which is important for memory-bounded reduce operations.
+
+        Args:
+            idx: The partition index
+
+        Yields:
+            MicroPartition: Individual chunks of the partition
+        """
+        result = self._results[idx]
+        yield from result.iter_chunks()
 
     def set_partition(self, idx: PartID, result: MaterializedResult[list[ray.ObjectRef]]) -> None:
         assert isinstance(result, RayMaterializedResult)
@@ -732,6 +747,31 @@ class RayMaterializedResult(MaterializedResult[list[ray.ObjectRef]]):
 
     def partition(self) -> list[ray.ObjectRef]:
         return self._partition
+
+    def num_chunks(self) -> int:
+        """Return the number of chunks (ObjectRefs) in this partition."""
+        return len(self._partition)
+
+    def iter_chunks(self) -> Generator[MicroPartition, None, None]:
+        """Lazily iterate over chunks, fetching one at a time via ray.get.
+
+        This avoids materializing all chunks into memory at once, which is
+        important for partitions with many spilled chunks.
+        """
+        for ref in self._partition:
+            yield ray.get(ref)
+
+    def iter_chunks_batched(self, batch_size: int = 2) -> Generator[list[MicroPartition], None, None]:
+        """Iterate over chunks in batches for better throughput.
+
+        Args:
+            batch_size: Number of chunks to prefetch at a time. Default is 2
+                       to hide latency without causing OOM.
+        """
+        refs = self._partition
+        for i in range(0, len(refs), batch_size):
+            batch_refs = refs[i:i + batch_size]
+            yield ray.get(batch_refs)
 
     def micropartition(self) -> MicroPartition:
         parts = ray.get(self._partition)

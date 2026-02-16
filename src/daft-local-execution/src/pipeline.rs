@@ -61,7 +61,7 @@ use crate::{
         window_partition_only::WindowPartitionOnlySink,
         write::{WriteFormat, WriteSink},
     },
-    sources::{empty_scan::EmptyScanSource, in_memory::InMemorySource, source::SourceNode},
+    sources::{empty_scan::EmptyScanSource, in_memory::InMemorySource, source::{Source, SourceNode}},
     streaming_sink::{
         async_udf::AsyncUdfSink, base::StreamingSinkNode, limit::LimitSink,
         monotonically_increasing_id::MonotonicallyIncreasingIdSink, sample::SampleSink,
@@ -193,6 +193,8 @@ pub struct BuilderContext {
     index_counter: std::cell::RefCell<usize>,
     pub meter: Meter,
     context: HashMap<String, String>,
+    /// Optional source override for replacing InMemoryScan with a streaming source.
+    source_override: Option<Arc<dyn Source>>,
 }
 
 impl BuilderContext {
@@ -210,6 +212,7 @@ impl BuilderContext {
             index_counter: std::cell::RefCell::new(0),
             meter,
             context,
+            source_override: None,
         }
     }
 
@@ -218,6 +221,11 @@ impl BuilderContext {
         let index = *counter;
         *counter += 1;
         index
+    }
+
+    pub fn with_source_override(mut self, source: Arc<dyn Source>) -> Self {
+        self.source_override = Some(source);
+        self
     }
 
     pub fn next_node_info(
@@ -512,16 +520,22 @@ fn physical_plan_to_pipeline(
             stats_state,
             context,
         }) => {
-            let cache_key: Arc<str> = info.cache_key.clone().into();
+            if let Some(source_override) = &ctx.source_override {
+                // Use the streaming source override (e.g. RaySourceNode) instead of
+                // eagerly materializing all partitions into memory.
+                SourceNode::new(source_override.clone(), stats_state.clone(), ctx, context).boxed()
+            } else {
+                let cache_key: Arc<str> = info.cache_key.clone().into();
 
-            let materialized_pset = psets.get_partition_set(&cache_key);
-            let in_memory_source = InMemorySource::new(
-                materialized_pset,
-                info.source_schema.clone(),
-                info.size_bytes,
-            )
-            .arced();
-            SourceNode::new(in_memory_source, stats_state.clone(), ctx, context).boxed()
+                let materialized_pset = psets.get_partition_set(&cache_key);
+                let in_memory_source = InMemorySource::new(
+                    materialized_pset,
+                    info.source_schema.clone(),
+                    info.size_bytes,
+                )
+                .arced();
+                SourceNode::new(in_memory_source, stats_state.clone(), ctx, context).boxed()
+            }
         }
         LocalPhysicalPlan::Project(Project {
             input,
@@ -866,7 +880,12 @@ fn physical_plan_to_pipeline(
             context,
             ..
         }) => {
-            let sort_sink = SortSink::new(sort_by.clone(), descending.clone(), nulls_first.clone());
+            let spill_config = crate::sinks::sort::SortSpillConfig {
+                spill_threshold: cfg.shuffle_spill_threshold,
+                spill_dir: cfg.shuffle_reduce_spill_dir.clone(),
+            };
+            let sort_sink = SortSink::new(sort_by.clone(), descending.clone(), nulls_first.clone())
+                .with_spill_config(spill_config);
             let child_node = physical_plan_to_pipeline(input, psets, cfg, ctx)?;
             BlockingSinkNode::new(
                 Arc::new(sort_sink),

@@ -138,6 +138,7 @@ pub struct DaftExecutionConfig {
     pub enable_dynamic_batching: bool,
     pub dynamic_batching_strategy: String,
     pub shuffle_spill_threshold: Option<usize>,
+    pub shuffle_reduce_spill_dir: Option<String>,
 }
 
 #[cfg(not(debug_assertions))]
@@ -181,6 +182,7 @@ impl Default for DaftExecutionConfig {
             enable_dynamic_batching: false,
             dynamic_batching_strategy: "auto".to_string(),
             shuffle_spill_threshold: None,
+            shuffle_reduce_spill_dir: None,
         }
     }
 }
@@ -196,6 +198,7 @@ impl DaftExecutionConfig {
     const ENV_JSON_INFLATION_FACTOR: &'static str = "DAFT_JSON_INFLATION_FACTOR";
     const ENV_DAFT_MAINTAIN_ORDER: &'static str = "DAFT_MAINTAIN_ORDER";
     const ENV_DAFT_SHUFFLE_SPILL_THRESHOLD: &'static str = "DAFT_SHUFFLE_SPILL_THRESHOLD";
+    const ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR: &'static str = "DAFT_SHUFFLE_REDUCE_SPILL_DIR";
 
     #[must_use]
     pub fn from_env() -> Self {
@@ -260,6 +263,10 @@ impl DaftExecutionConfig {
             cfg.shuffle_spill_threshold.unwrap_or(0),
         ) {
             cfg.shuffle_spill_threshold = Some(val);
+        }
+
+        if let Some(val) = parse_string_from_env(Self::ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR, true) {
+            cfg.shuffle_reduce_spill_dir = Some(val);
         }
 
         cfg
@@ -526,6 +533,37 @@ mod tests {
 
             unsafe {
                 std::env::remove_var(DaftExecutionConfig::ENV_DAFT_SHUFFLE_SPILL_THRESHOLD);
+            }
+        }
+
+        // ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR
+        {
+            let cfg = DaftExecutionConfig::from_env();
+            assert_eq!(cfg.shuffle_reduce_spill_dir, None);
+
+            unsafe {
+                std::env::set_var(
+                    DaftExecutionConfig::ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR,
+                    "/tmp/spill",
+                );
+            }
+            let cfg = DaftExecutionConfig::from_env();
+            assert_eq!(cfg.shuffle_reduce_spill_dir, Some("/tmp/spill".to_string()));
+
+            unsafe {
+                std::env::set_var(
+                    DaftExecutionConfig::ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR,
+                    "  /var/tmp/daft-spill  ",
+                );
+            }
+            let cfg = DaftExecutionConfig::from_env();
+            assert_eq!(
+                cfg.shuffle_reduce_spill_dir,
+                Some("/var/tmp/daft-spill".to_string())
+            );
+
+            unsafe {
+                std::env::remove_var(DaftExecutionConfig::ENV_DAFT_SHUFFLE_REDUCE_SPILL_DIR);
             }
         }
     }

@@ -42,6 +42,7 @@ use crate::{
     },
     resource_manager::get_or_init_memory_manager,
     runtime_stats::{QueryEndState, RuntimeStatsManager},
+    sources::ray_source::{RaySourceConfig, RaySourceNode},
 };
 
 /// Global tokio runtime shared by all NativeExecutor instances
@@ -135,6 +136,44 @@ impl PyNativeExecutor {
         py_execution_result.into_pyobject(py)
     }
 
+    /// Run a plan with a streaming source, replacing InMemoryScan with a RaySourceNode
+    /// that lazily fetches data from a Python iterator.
+    ///
+    /// This avoids OOM by not materializing all psets upfront.
+    #[pyo3(signature = (local_physical_plan, py_iterator, source_schema, daft_ctx, results_buffer_size=None, context=None))]
+    pub fn run_streaming<'a>(
+        &self,
+        py: Python<'a>,
+        local_physical_plan: &daft_local_plan::PyLocalPhysicalPlan,
+        py_iterator: pyo3::Py<pyo3::types::PyAny>,
+        source_schema: daft_core::python::PySchema,
+        daft_ctx: &PyDaftContext,
+        results_buffer_size: Option<usize>,
+        context: Option<HashMap<String, String>>,
+    ) -> PyResult<Bound<'a, PyExecutionEngineResult>> {
+        let schema = source_schema.schema;
+        let ray_source = RaySourceNode::new(schema, py_iterator, RaySourceConfig::default()).arced();
+
+        let psets = InMemoryPartitionSetCache::empty();
+        let daft_ctx: &DaftContext = daft_ctx.into();
+        let res = py.detach(|| {
+            self.executor.run_with_source_override(
+                &local_physical_plan.plan,
+                &psets,
+                daft_ctx.execution_config(),
+                daft_ctx.subscribers(),
+                results_buffer_size,
+                context,
+                ray_source,
+            )
+        })?;
+
+        let py_execution_result = PyExecutionEngineResult {
+            result: Arc::new(Mutex::new(Some(res))),
+        };
+        py_execution_result.into_pyobject(py)
+    }
+
     #[staticmethod]
     pub fn repr_ascii(
         logical_plan_builder: &PyLogicalPlanBuilder,
@@ -207,7 +246,6 @@ impl NativeExecutor {
         results_buffer_size: Option<usize>,
         additional_context: Option<HashMap<String, String>>,
     ) -> DaftResult<ExecutionEngineResult> {
-        let cancel = self.cancel.clone();
         let additional_context = additional_context.unwrap_or_default();
         let query_id: common_metrics::QueryID = additional_context
             .get("query_id")
@@ -223,6 +261,47 @@ impl NativeExecutor {
         let pipeline =
             translate_physical_plan_to_pipeline(local_physical_plan, psets, &exec_cfg, &ctx)?;
 
+        self.run_pipeline(pipeline, exec_cfg, subscribers, results_buffer_size, query_id)
+    }
+
+    pub fn run_with_source_override(
+        &self,
+        local_physical_plan: &LocalPhysicalPlanRef,
+        psets: &(impl PartitionSetCache<MicroPartitionRef, Arc<MicroPartitionSet>> + ?Sized),
+        exec_cfg: Arc<DaftExecutionConfig>,
+        subscribers: Vec<Arc<dyn Subscriber>>,
+        results_buffer_size: Option<usize>,
+        additional_context: Option<HashMap<String, String>>,
+        source_override: Arc<dyn crate::sources::source::Source>,
+    ) -> DaftResult<ExecutionEngineResult> {
+        let additional_context = additional_context.unwrap_or_default();
+        let query_id: common_metrics::QueryID = additional_context
+            .get("query_id")
+            .ok_or_else(|| {
+                common_error::DaftError::ValueError(
+                    "query_id not found in additional_context".to_string(),
+                )
+            })?
+            .clone()
+            .into();
+
+        let ctx = BuilderContext::new_with_context(query_id.clone(), additional_context)
+            .with_source_override(source_override);
+        let pipeline =
+            translate_physical_plan_to_pipeline(local_physical_plan, psets, &exec_cfg, &ctx)?;
+
+        self.run_pipeline(pipeline, exec_cfg, subscribers, results_buffer_size, query_id)
+    }
+
+    fn run_pipeline(
+        &self,
+        pipeline: Box<dyn crate::pipeline::PipelineNode>,
+        exec_cfg: Arc<DaftExecutionConfig>,
+        subscribers: Vec<Arc<dyn Subscriber>>,
+        results_buffer_size: Option<usize>,
+        query_id: common_metrics::QueryID,
+    ) -> DaftResult<ExecutionEngineResult> {
+        let cancel = self.cancel.clone();
         let (tx, rx) = create_channel(results_buffer_size.unwrap_or(1));
         let enable_explain_analyze = self.enable_explain_analyze;
 

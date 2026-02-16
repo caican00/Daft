@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter, Result},
     hash::{Hash, Hasher},
-    io::Cursor,
+    io::{Cursor, Read, Write},
     sync::Arc,
 };
 
@@ -1590,6 +1590,46 @@ impl RecordBatch {
         writer.finish()?;
         buffer.shrink_to_fit();
         Ok(buffer)
+    }
+
+    pub fn write_to_ipc_stream<W: Write>(
+        batches: &[RecordBatch],
+        writer: &mut W,
+    ) -> DaftResult<()> {
+        if batches.is_empty() {
+            return Ok(());
+        }
+        let schema = batches[0].schema.clone();
+        let arrow_schema = schema.to_arrow()?;
+        let mut stream_writer =
+            arrow_ipc::writer::StreamWriter::try_new(writer, &arrow_schema)?;
+
+        for batch in batches {
+            if batch.schema != schema {
+                return Err(DaftError::SchemaMismatch(format!(
+                    "RecordBatch write_to_ipc_stream requires all schemas to match, {} vs {}",
+                    schema, batch.schema
+                )));
+            }
+            let arrow_batch: arrow_array::RecordBatch = batch.clone().try_into()?;
+            stream_writer.write(&arrow_batch)?;
+        }
+        stream_writer.finish()?;
+        Ok(())
+    }
+
+    pub fn read_ipc_stream_iter<R: Read + Send + 'static>(
+        reader: R,
+    ) -> DaftResult<impl Iterator<Item = DaftResult<RecordBatch>>> {
+        let stream_reader = arrow_ipc::reader::StreamReader::try_new(reader, None)?;
+        let arrow_schema = stream_reader.schema();
+        let schema: Arc<Schema> = Arc::new(arrow_schema.as_ref().try_into()?);
+
+        Ok(stream_reader.map(move |arrow_batch_result| {
+            let arrow_batch = arrow_batch_result?;
+            let arrow_arrays: Vec<ArrayRef> = arrow_batch.columns().to_vec();
+            Self::from_arrow(schema.clone(), arrow_arrays)
+        }))
     }
 
     pub fn from_ipc_stream(buffer: &[u8]) -> DaftResult<Self> {

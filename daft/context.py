@@ -187,6 +187,7 @@ def set_execution_config(
     enable_dynamic_batching: bool | None = None,
     dynamic_batching_strategy: str | None = None,
     shuffle_spill_threshold: int | None = None,
+    shuffle_reduce_spill_dir: str | None = None,
 ) -> DaftContext:
     """Globally sets various configuration parameters which control various aspects of Daft execution.
 
@@ -231,6 +232,8 @@ def set_execution_config(
         enable_dynamic_batching: Whether to enable dynamic batching. Defaults to False.
         dynamic_batching_strategy: The strategy to use for dynamic batching. Defaults to 'auto'.
         shuffle_spill_threshold: Memory threshold in bytes for shuffle spill. Defaults to None (no spill).
+        shuffle_reduce_spill_dir: Directory path for shuffle reduce spill files. Must be a local filesystem path.
+            If None, spilling is disabled. If provided but not a valid local path, an error is thrown.
     """
     # Replace values in the DaftExecutionConfig with user-specified overrides
     ctx = get_context()
@@ -268,6 +271,7 @@ def set_execution_config(
             enable_dynamic_batching=enable_dynamic_batching,
             dynamic_batching_strategy=dynamic_batching_strategy,
             shuffle_spill_threshold=shuffle_spill_threshold,
+            shuffle_reduce_spill_dir=shuffle_reduce_spill_dir,
         )
 
         ctx._ctx._daft_execution_config = new_daft_execution_config
